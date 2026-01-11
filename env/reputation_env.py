@@ -34,8 +34,8 @@ class ReputationEnv(gym.Env):
         # Work parameters
         base_work_rate: float = 0.05,
         # Assistant action parameters
-        help_strength: float = 0.60,
-        signal_strength: float = 0.5,
+        help_strength: float = 0.2,
+        signal_strength: float = 1.0,
         # Cost coefficients for reward
         c_help: float = 0.0,
         c_signal: float = 0.0,

@@ -10,7 +10,7 @@ from stable_baselines3 import PPO
 from env.reputation_env import ReputationEnv
 
 
-def run_episode(env, model=None, force_do_nothing=False, seed=None):
+def run_episode(env, model=None, force_do_nothing=False, seed=None, deterministic: bool = False):
     obs, info = env.reset(seed=seed)
     
     total_reward = 0.0
@@ -23,7 +23,7 @@ def run_episode(env, model=None, force_do_nothing=False, seed=None):
         if force_do_nothing:
             action = 0  # DO_NOTHING
         else:
-            action, _ = model.predict(obs, deterministic=True)
+            action, _ = model.predict(obs, deterministic=deterministic)
             action = int(action)
         
         actions_taken.append(action)
@@ -48,7 +48,7 @@ def run_episode(env, model=None, force_do_nothing=False, seed=None):
     }
 
 
-def paired_evaluation(model, n_seeds=50, base_seed=42):
+def paired_evaluation(model, n_seeds=50, base_seed=42, deterministic: bool = False):
     results = {
         "with_assistant": [],
         "without_assistant": [],
@@ -66,7 +66,13 @@ def paired_evaluation(model, n_seeds=50, base_seed=42):
             
             env_without.learned_expected_effort = env_with.learned_expected_effort
 
-            result_with = run_episode(env_with, model=model, force_do_nothing=False, seed=seed)
+            result_with = run_episode(
+                env_with,
+                model=model,
+                force_do_nothing=False,
+                seed=seed,
+                deterministic=deterministic,
+            )
             
             result_without = run_episode(env_without, model=None, force_do_nothing=True, seed=seed)
             
@@ -338,14 +344,15 @@ def main():
     model = PPO.load(model_path)
     
     # Run paired evaluation
-    print("Running paired rollout evaluation...")
-    results = paired_evaluation(model, n_seeds=50, base_seed=42)
+    print("Running paired rollout evaluation (stochastic policy sampling)...")
+    results = paired_evaluation(model, n_seeds=50, base_seed=42, deterministic=False)
     
     # Print summary
     print_summary(results)
     
     # Generate plots
     generate_plots(results, output_dir="plots")
+
     plot_training_curves(csv_path="training_metrics.csv", output_dir="plots", window=50)
     
     print("\nEvaluation complete.")

@@ -10,7 +10,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from env.reputation_env import ReputationEnv
 
 # Quick sanity check (10k steps instead of 100k)
-QUICK_TEST = True
+QUICK_TEST = False
 
 
 class EpisodeMetricsCallback(BaseCallback):
