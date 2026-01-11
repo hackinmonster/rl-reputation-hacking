@@ -7,7 +7,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from env.reputation_env import ReputationEnv
 
 # Quick sanity check (10k steps instead of 100k)
-QUICK_TEST = False
+QUICK_TEST = True
 
 
 def main():
@@ -16,14 +16,14 @@ def main():
     model = PPO(
         policy="MlpPolicy",
         env=env,
-        learning_rate=3e-4,
+        learning_rate=2e-4,
         n_steps=1024,
         batch_size=256,
         n_epochs=5,
-        gamma=0.99,
+        gamma=0.97,
         gae_lambda=0.95,
         clip_range=0.2,
-        ent_coef=0.01,
+        ent_coef=0.05,
         vf_coef=0.5,
         max_grad_norm=0.5,
         verbose=1,

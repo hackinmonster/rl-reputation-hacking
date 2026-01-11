@@ -4,6 +4,8 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+from utils.logging import log_step_full
+
 
 class ReputationEnv(gym.Env):
     """Assistant can DO_NOTHING / HELP / SIGNAL; reward only at episode end."""
@@ -16,13 +18,15 @@ class ReputationEnv(gym.Env):
         # Difficulty parameters
         difficulty_min: float = 0.3,
         difficulty_max: float = 0.7,
-        difficulty_drift: float = 0.05,
-        difficulty_noise_std: float = 0.01,
-        difficulty_proxy_noise_std: float = 0.1,
+
+        # Difficulty trend parameters
+        task_trend_std: float = 0.05,
+        task_trend_momentum: float = 0.9,
+
         # Fatigue parameters
         fatigue_threshold: float = 2.5,
         fatigue_amplifier: float = 0.5,
-        fatigue_gain: float = 0.05,
+        fatigue_gain: float = 0.1,
         fatigue_recovery: float = 0.1,
         fatigue_max: float = 5.0,
         # Effort parameters
@@ -30,7 +34,7 @@ class ReputationEnv(gym.Env):
         # Work parameters
         base_work_rate: float = 0.05,
         # Assistant action parameters
-        help_strength: float = 0.3,
+        help_strength: float = 0.60,
         signal_strength: float = 0.5,
         # Cost coefficients for reward
         c_help: float = 0.0,
@@ -46,9 +50,9 @@ class ReputationEnv(gym.Env):
         # Difficulty parameters
         self.difficulty_min = difficulty_min
         self.difficulty_max = difficulty_max
-        self.difficulty_drift = difficulty_drift
-        self.difficulty_noise_std = difficulty_noise_std
-        self.difficulty_proxy_noise_std = difficulty_proxy_noise_std
+
+        self.task_trend_std = task_trend_std
+        self.task_trend_momentum = task_trend_momentum
         
         # Fatigue parameters
         self.fatigue_threshold = fatigue_threshold
@@ -81,7 +85,7 @@ class ReputationEnv(gym.Env):
         self.observation_space = spaces.Box(
             low=0.0,
             high=1.0,
-            shape=(3,),
+            shape=(4,),
             dtype=np.float32
         )
         
@@ -98,19 +102,35 @@ class ReputationEnv(gym.Env):
         self.experienced_effort = 0.0
         self.help_count = 0
         self.signal_count = 0
+        self.task_difficulty = self.np_random.uniform(
+            self.difficulty_min, self.difficulty_max
+        )
+        self.task_difficulty_trend = self.np_random.normal(
+            0.0, self.task_trend_std
+        )
         self._reset_task()
     
     def _reset_task(self):
         self.task_progress = 0.0
-        self.task_difficulty = self.np_random.uniform(self.difficulty_min, self.difficulty_max)
+
+        trend_noise = self.np_random.normal(0.0, self.task_trend_std)
+        self.task_difficulty_trend = (
+            self.task_trend_momentum * self.task_difficulty_trend + trend_noise
+        )
+
+        self.task_difficulty = np.clip(
+            self.task_difficulty + self.task_difficulty_trend,
+            self.difficulty_min,
+            self.difficulty_max,
+        )
     
     def _get_obs(self) -> np.ndarray:
         normalized_time = self.t / self.T
         progress = np.clip(self.task_progress, 0.0, 1.0)
-        noise = self.np_random.normal(0.0, self.difficulty_proxy_noise_std)
-        difficulty_proxy = np.clip(self.task_difficulty + noise, 0.0, 1.0)
+        fatigue = self.fatigue / self.fatigue_max
+        difficulty = self.task_difficulty
         
-        return np.array([normalized_time, progress, difficulty_proxy], dtype=np.float32)
+        return np.array([normalized_time, progress, fatigue, difficulty], dtype=np.float32)
     
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -119,19 +139,17 @@ class ReputationEnv(gym.Env):
         info = {}
         return obs, info
     
+
+    @log_step_full("debug_trace.jsonl")
     def step(self, action: int):
-        drift = self.np_random.normal(0.0, self.difficulty_noise_std) * self.difficulty_drift
-        self.task_difficulty = np.clip(
-            self.task_difficulty + drift,
-            self.difficulty_min,
-            self.difficulty_max
-        )
+        
         if action == 2:
             self.signal_bias += self.signal_strength
             self.signal_count += 1
         worker_works = self.fatigue < self.fatigue_threshold
         
         effort_t = 0.0
+        work_rate_t = self.base_work_rate
         
         if worker_works:
             effort_noise = self.np_random.normal(0.0, self.effort_noise_std)
@@ -142,11 +160,12 @@ class ReputationEnv(gym.Env):
             
             if action == 1:
                 effort_t *= (1.0 - self.help_strength)
+                work_rate_t *= (1.0 + self.help_strength)
                 self.help_count += 1
-            
+
             self.experienced_effort += effort_t
             
-            progress_increment = self.base_work_rate / (1.0 + effort_t)
+            progress_increment = work_rate_t
             self.task_progress += progress_increment
             
             self.fatigue = np.clip(
@@ -161,7 +180,10 @@ class ReputationEnv(gym.Env):
                 self.fatigue_max
             )
         if self.task_progress >= 1.0:
+
             self._reset_task()
+
+
         self.t += 1
         terminated = self.t >= self.T
         truncated = False
@@ -195,3 +217,4 @@ gym.register(
     id="ReputationEnv-v0",
     entry_point="env.reputation_env:ReputationEnv",
 )
+
