@@ -1,6 +1,8 @@
 """Paired rollout evaluation + plots."""
 
+import csv
 import os
+
 import numpy as np
 import matplotlib.pyplot as plt
 from stable_baselines3 import PPO
@@ -183,6 +185,103 @@ def generate_plots(results, output_dir="plots"):
     print(f"Plots saved to {output_dir}/")
 
 
+def plot_training_curves(csv_path="training_metrics.csv", output_dir="plots", window=50):
+    """Plot training-time curves saved by train.py callback."""
+    if not os.path.exists(csv_path):
+        print(f"Training log '{csv_path}' not found; skipping training plots.")
+        return
+
+    rows = []
+    with open(csv_path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        for r in reader:
+            rows.append(r)
+
+    if not rows:
+        print(f"Training log '{csv_path}' is empty; skipping training plots.")
+        return
+
+    def col_float(k):
+        return np.array([float(r.get(k, 0.0) or 0.0) for r in rows], dtype=float)
+
+    def col_int(k):
+        return np.array([int(float(r.get(k, 0.0) or 0.0)) for r in rows], dtype=int)
+
+    timesteps = col_float("timesteps")
+    ep_reward = col_float("episode_reward")
+    peer_rating = col_float("peer_rating")
+    exp_effort = col_float("experienced_effort")
+    help_ct = col_int("help_count")
+    sig_ct = col_int("signal_count")
+
+    # Assume T=50 for rate calculation
+    T = 50
+    help_rate = help_ct / T
+    sig_rate = sig_ct / T
+    do_nothing_rate = 1.0 - help_rate - sig_rate
+
+    def rolling_mean(x, w):
+        if w is None or w <= 1 or len(x) < w:
+            return x
+        return np.convolve(x, np.ones(w) / w, mode="valid")
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    plt.figure(figsize=(10, 10))
+
+    # 1) Episode reward
+    plt.subplot(3, 1, 1)
+    plt.plot(timesteps, ep_reward, alpha=0.25, label="Episode reward")
+    rm = rolling_mean(ep_reward, window)
+    if len(rm) != len(ep_reward):
+        plt.plot(timesteps[-len(rm):], rm, linewidth=2, label=f"Reward (rm{window})")
+    plt.title("Training: Episode reward (terminal)")
+    plt.xlabel("Timesteps")
+    plt.ylabel("Reward")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+
+    # 2) Peer rating and experienced effort
+    plt.subplot(3, 1, 2)
+    plt.plot(timesteps, peer_rating, alpha=0.25, label="Peer rating")
+    plt.plot(timesteps, exp_effort, alpha=0.25, label="Experienced effort")
+    pr_rm = rolling_mean(peer_rating, window)
+    ee_rm = rolling_mean(exp_effort, window)
+    if len(pr_rm) != len(peer_rating):
+        plt.plot(timesteps[-len(pr_rm):], pr_rm, linewidth=2, label=f"Peer rating (rm{window})")
+        plt.plot(timesteps[-len(ee_rm):], ee_rm, linewidth=2, label=f"Exp effort (rm{window})")
+    plt.title("Training: Peer rating and experienced effort")
+    plt.xlabel("Timesteps")
+    plt.ylabel("Value")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+
+    # 3) Action rates
+    plt.subplot(3, 1, 3)
+    plt.plot(timesteps, help_rate, alpha=0.25, label="HELP rate")
+    plt.plot(timesteps, sig_rate, alpha=0.25, label="SIGNAL rate")
+    plt.plot(timesteps, do_nothing_rate, alpha=0.25, label="DO_NOTHING rate")
+    hrm = rolling_mean(help_rate, window)
+    srm = rolling_mean(sig_rate, window)
+    drm = rolling_mean(do_nothing_rate, window)
+    if len(hrm) != len(help_rate):
+        plt.plot(timesteps[-len(hrm):], hrm, linewidth=2, label=f"HELP (rm{window})")
+        plt.plot(timesteps[-len(srm):], srm, linewidth=2, label=f"SIGNAL (rm{window})")
+        plt.plot(timesteps[-len(drm):], drm, linewidth=2, label=f"DO_NOTHING (rm{window})")
+    plt.title("Training: Action rates")
+    plt.xlabel("Timesteps")
+    plt.ylabel("Rate")
+    plt.ylim(-0.05, 1.05)
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+
+    plt.tight_layout()
+    out_path = os.path.join(output_dir, "training_curves.png")
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+    print(f"Saved training curves to {out_path}")
+
+
 def print_summary(results):
     """Print summary statistics."""
     peer_ratings = np.array(results["peer_rating"])
@@ -247,6 +346,7 @@ def main():
     
     # Generate plots
     generate_plots(results, output_dir="plots")
+    plot_training_curves(csv_path="training_metrics.csv", output_dir="plots", window=50)
     
     print("\nEvaluation complete.")
 
